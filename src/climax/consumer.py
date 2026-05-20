@@ -113,11 +113,15 @@ def _parse_chat_message(raw: str) -> dict | None:
 # ── Loop principal ───────────────────────────────────────────────────────────
 
 
-async def run() -> None:
+async def run(queue: asyncio.Queue | None = None) -> None:
     """
     Punto de entrada del consumer. Se conecta al chat de Kick y loguea
     cada mensaje hasta que se interrumpa con Ctrl+C.
     Implementa reconexión automática con backoff exponencial.
+
+    Args:
+        queue: si se pasa, cada mensaje parseado se pone en la queue
+               para que el aggregator lo consuma. Si es None, solo loguea.
     """
     channel = get_kick_channel()
     chatroom_id = await get_chatroom_id(channel)
@@ -128,7 +132,7 @@ async def run() -> None:
 
     while True:
         try:
-            await _connect_and_listen(chatroom_id)
+            await _connect_and_listen(chatroom_id, queue)
             backoff = 1  # reset si la conexión fue exitosa
         except websockets.exceptions.ConnectionClosed as exc:
             log.warning("conexion_cerrada", code=exc.code, reason=exc.reason)
@@ -140,7 +144,10 @@ async def run() -> None:
         backoff = min(backoff * 2, 60)  # backoff exponencial, máximo 60s
 
 
-async def _connect_and_listen(chatroom_id: int) -> None:
+async def _connect_and_listen(
+    chatroom_id: int,
+    queue: asyncio.Queue | None = None,
+) -> None:
     """
     Abre una conexión WebSocket, se suscribe al chatroom y procesa
     mensajes hasta que la conexión se cierre.
@@ -171,3 +178,7 @@ async def _connect_and_listen(chatroom_id: int) -> None:
                 content=parsed["content"],
                 created_at=parsed["created_at"],
             )
+
+            # Enviar a la queue si existe (no bloqueante)
+            if queue is not None:
+                await queue.put(parsed)
