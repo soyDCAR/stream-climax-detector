@@ -1,5 +1,5 @@
 """
-scripts/run_consumer.py — Arranca consumer + aggregator en paralelo.
+scripts/run_consumer.py — Arranca consumer + aggregator + scorer en paralelo.
 Uso: python scripts/run_consumer.py
 """
 
@@ -9,6 +9,7 @@ import structlog
 
 from climax.aggregator import run as run_aggregator
 from climax.consumer import run as run_consumer
+from climax.scorer import ClimaxScorer
 
 structlog.configure(
     processors=[
@@ -19,14 +20,12 @@ structlog.configure(
 
 
 async def main() -> None:
-    # Cola compartida: el consumer produce, el aggregator consume
     queue: asyncio.Queue = asyncio.Queue()
+    scorer = ClimaxScorer()
 
-    # asyncio.gather corre ambas corrutinas concurrentemente en el mismo
-    # event loop — no son threads, son tareas cooperativas que se turnan.
     await asyncio.gather(
         run_consumer(queue=queue),
-        run_aggregator(queue=queue),
+        run_aggregator(queue=queue, scorer=scorer),
     )
 
 

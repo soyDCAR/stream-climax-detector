@@ -161,12 +161,13 @@ def compute_features(
 async def run(
     queue: asyncio.Queue,
     window_seconds: float = WINDOW_SIZE,
+    scorer=None,
 ) -> None:
     """
     Loop principal del aggregator.
 
     - Consume mensajes de la queue sin bloquearse.
-    - Cada `window_seconds` calcula los features y los loguea.
+    - Cada `window_seconds` calcula los features y los pasa al scorer.
     - La deque actúa como buffer: guarda solo los mensajes de la
       ventana actual. Al cerrar cada ventana, la vaciamos para empezar
       la siguiente ventana limpia.
@@ -174,6 +175,7 @@ async def run(
     Args:
         queue:          asyncio.Queue alimentada por el consumer.
         window_seconds: duración de cada ventana en segundos (default 5).
+        scorer:         instancia de ClimaxScorer. Si es None, solo loguea features.
     """
     buffer: deque[ChatMessage] = deque(maxlen=MAX_MSGS)
     window_start = time.monotonic()
@@ -201,5 +203,10 @@ async def run(
         if elapsed >= window_seconds:
             features = compute_features(list(buffer), elapsed)
             log.info("feature_window", **features.as_dict())
+
+            # Pasar al scorer si está disponible
+            if scorer is not None:
+                scorer.process(features)
+
             buffer.clear()
             window_start = time.monotonic()
