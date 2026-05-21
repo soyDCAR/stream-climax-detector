@@ -8,18 +8,26 @@ Muestra:
   - Timeline de climax_score en los últimos N minutos
   - Tabla de últimos picos detectados
 
+El consumer (WebSocket → aggregator → scorer → DB) corre en un thread
+dedicado gestionado desde el sidebar. El usuario puede escribir cualquier
+canal de Kick y arrancar/parar el consumer sin reiniciar la app.
+
 Modelo de ejecución de Streamlit:
   El script se re-ejecuta COMPLETO cada vez que hay una interacción
   o cuando st.rerun() es llamado. st.cache_resource garantiza que
   la conexión a SQLite se crea una sola vez, no en cada re-ejecución.
 """
 
+import asyncio
+import threading
 import time
 
 import pandas as pd
 import streamlit as st
 
-from climax.config import get_kick_channel
+from climax.aggregator import run as aggregator_run
+from climax.consumer import run as consumer_run
+from climax.scorer import ClimaxScorer
 from climax.storage import DEFAULT_DB_PATH, Storage
 
 # ── Configuración de página ───────────────────────────────────────────────────
@@ -34,13 +42,82 @@ REFRESH_INTERVAL = 2  # segundos entre refrescos automáticos
 DEFAULT_WINDOW = 10  # minutos de historial a mostrar por defecto
 
 
+# ── Pipeline en thread separado ───────────────────────────────────────────────
+
+
+async def _pipeline(channel: str, stop_event: threading.Event) -> None:
+    """
+    Corrutina que orquesta consumer + aggregator + scorer + storage.
+    Se ejecuta dentro de asyncio.run() en un thread dedicado.
+
+    Por qué asyncio.run() en un thread y no en el event loop de Streamlit:
+    - Streamlit no expone su event loop; crear uno propio en un thread es
+      el patrón estándar para corrutinas de larga duración en Streamlit.
+    - El stop_event de threading es visible desde ambos lados:
+      el thread del consumer lo lee, el hilo de Streamlit lo escribe.
+    """
+    queue: asyncio.Queue = asyncio.Queue()
+    scorer = ClimaxScorer()
+    storage = Storage(db_path=DEFAULT_DB_PATH, channel=channel)
+    storage.open()
+
+    # Monkey-patch: interceptamos scorer.process para guardar en DB
+    # igual que en run_consumer.py — sin modificar la clase scorer
+    _original_process = scorer.process
+
+    def _process_and_save(window):
+        result = _original_process(window)
+        storage.save(result)
+        return result
+
+    scorer.process = _process_and_save
+
+    try:
+        await asyncio.gather(
+            consumer_run(queue=queue, channel=channel, stop_event=stop_event),
+            aggregator_run(queue=queue, scorer=scorer),
+        )
+    finally:
+        storage.close()
+
+
+def _run_pipeline_in_thread(channel: str, stop_event: threading.Event) -> None:
+    """Función target del thread — crea un event loop propio y corre el pipeline."""
+    asyncio.run(_pipeline(channel, stop_event))
+
+
+def start_worker(channel: str) -> tuple[threading.Thread, threading.Event]:
+    """Crea y arranca un nuevo thread del pipeline para el canal dado."""
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=_run_pipeline_in_thread,
+        args=(channel, stop_event),
+        daemon=True,  # muere automáticamente si Streamlit termina
+        name=f"climax-worker-{channel}",
+    )
+    thread.start()
+    return thread, stop_event
+
+
+def stop_worker(
+    thread: threading.Thread | None,
+    stop_event: threading.Event | None,
+    timeout: float = 5.0,
+) -> None:
+    """Señaliza stop_event y espera a que el thread termine (máx timeout segundos)."""
+    if stop_event is not None:
+        stop_event.set()
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=timeout)
+
+
 # ── Conexión a SQLite (cacheada) ──────────────────────────────────────────────
 
 
 @st.cache_resource
-def get_storage() -> Storage:
+def get_storage(channel: str) -> Storage:
     """
-    Abre la conexión a SQLite una sola vez por sesión de Streamlit.
+    Abre la conexión a SQLite una sola vez por (sesión × canal).
     st.cache_resource persiste el objeto entre re-ejecuciones del script.
 
     Por qué cache_resource y no cache_data:
@@ -48,11 +125,6 @@ def get_storage() -> Storage:
     - cache_resource guarda el objeto vivo (conexiones, modelos ML, etc.)
     Una conexión SQLite no es serializable — necesitamos cache_resource.
     """
-    try:
-        channel = get_kick_channel()
-    except RuntimeError:
-        channel = "unknown"
-
     storage = Storage(db_path=DEFAULT_DB_PATH, channel=channel)
     storage.open()
     return storage
@@ -95,10 +167,75 @@ def load_peaks(storage: Storage) -> pd.DataFrame:
 # ── Layout ────────────────────────────────────────────────────────────────────
 
 
-def render_sidebar() -> int:
-    """Renderiza el sidebar y devuelve el rango de minutos seleccionado."""
+def render_sidebar() -> tuple[int, str]:
+    """
+    Renderiza el sidebar con input de canal y controles.
+    Devuelve (minutos_ventana, canal_activo).
+
+    Gestión del worker:
+    - Si el usuario cambia el canal → para el worker actual, arranca uno nuevo
+    - El estado del worker vive en st.session_state para persistir entre reruns
+    """
     st.sidebar.title("⚙️ Configuración")
 
+    # ── Input de canal ────────────────────────────────────────────────────────
+    channel_input = (
+        st.sidebar.text_input(
+            "Canal de Kick",
+            value=st.session_state.get("channel_input", ""),
+            placeholder="nexxuz, xqc, ibai...",
+            help="Escribe el nombre del canal y presiona Enter para conectar",
+        )
+        .strip()
+        .lower()
+    )
+
+    # Guardamos el valor del input para que no se resetee en reruns
+    st.session_state["channel_input"] = channel_input
+
+    active_channel = st.session_state.get("active_channel", "")
+
+    # Si el usuario escribió un canal diferente al activo → cambiar worker
+    if channel_input and channel_input != active_channel:
+        # Para el worker anterior si existe
+        stop_worker(
+            st.session_state.get("worker_thread"),
+            st.session_state.get("stop_event"),
+        )
+
+        # Arranca el nuevo worker
+        thread, stop_event = start_worker(channel_input)
+        st.session_state["worker_thread"] = thread
+        st.session_state["stop_event"] = stop_event
+        st.session_state["active_channel"] = channel_input
+        active_channel = channel_input
+
+        st.sidebar.success(f"📡 Conectando a **{channel_input}**...")
+    elif active_channel:
+        # Worker ya corriendo — mostramos estado
+        thread = st.session_state.get("worker_thread")
+        if thread and thread.is_alive():
+            st.sidebar.success(f"📡 Conectado: **{active_channel}**")
+        else:
+            st.sidebar.error(f"❌ Worker caído para **{active_channel}**")
+    else:
+        st.sidebar.info("👆 Escribe un canal para empezar")
+
+    # ── Botón de parar ────────────────────────────────────────────────────────
+    if active_channel and st.sidebar.button("⏹ Parar consumer"):
+        stop_worker(
+            st.session_state.get("worker_thread"),
+            st.session_state.get("stop_event"),
+        )
+        st.session_state["worker_thread"] = None
+        st.session_state["stop_event"] = None
+        st.session_state["active_channel"] = ""
+        st.session_state["channel_input"] = ""
+        st.sidebar.warning("Consumer detenido")
+
+    st.sidebar.divider()
+
+    # ── Ventana de tiempo ─────────────────────────────────────────────────────
     minutes = st.sidebar.slider(
         "Ventana de tiempo",
         min_value=1,
@@ -110,32 +247,23 @@ def render_sidebar() -> int:
 
     st.sidebar.divider()
     st.sidebar.markdown("**Umbrales**")
-
-    # Mostramos los valores actuales como referencia (no editables en v0.1)
     st.sidebar.metric("Z-score umbral", "2.0")
     st.sidebar.metric("Cooldown", "30s")
     st.sidebar.metric("Refresco", f"{REFRESH_INTERVAL}s")
 
     st.sidebar.divider()
-
-    try:
-        channel = get_kick_channel()
-        st.sidebar.success(f"📡 Canal: **{channel}**")
-    except RuntimeError:
-        st.sidebar.warning("⚠️ KICK_CHANNEL no configurado")
-
     db_exists = DEFAULT_DB_PATH.exists()
     if db_exists:
         size_kb = DEFAULT_DB_PATH.stat().st_size / 1024
         st.sidebar.info(f"💾 DB: {size_kb:.1f} KB")
     else:
-        st.sidebar.warning("💾 DB: sin datos aún")
+        st.sidebar.info("💾 DB: sin datos aún")
 
-    return minutes
+    return minutes, active_channel
 
 
 def render_metrics(df: pd.DataFrame) -> None:
-    """Renderiza las 3 métricas en la fila superior."""
+    """Renderiza las 4 métricas en la fila superior."""
     col1, col2, col3, col4 = st.columns(4)
 
     if df.empty:
@@ -175,16 +303,14 @@ def render_timeline(df: pd.DataFrame) -> None:
     if df.empty:
         st.info(
             "Sin datos todavía. "
-            "Arranca el consumer con `python scripts/run_consumer.py`"
+            "Escribe un canal en el sidebar y presiona Enter para conectar."
         )
         return
 
-    # Preparamos el DataFrame para el gráfico
     chart_df = df.set_index("datetime")[["climax_score"]].rename(
         columns={"climax_score": "Climax Score"}
     )
 
-    # Línea de referencia del umbral de pico (z=2 → climax≈88)
     PEAK_THRESHOLD_SCORE = 88.0
 
     st.line_chart(
@@ -193,7 +319,6 @@ def render_timeline(df: pd.DataFrame) -> None:
         height=300,
     )
 
-    # Marcamos los picos como puntos en un scatter aparte
     peaks_df = df[df["is_peak"]].copy()
     if not peaks_df.empty:
         st.caption(
@@ -214,7 +339,6 @@ def render_peaks_table(storage: Storage) -> None:
         )
         return
 
-    # Formateamos la columna datetime para legibilidad
     df["datetime"] = df["datetime"].dt.strftime("%H:%M:%S")
     df.columns = ["Hora", "Climax Score", "Z-Score", "Raw Score"]
 
@@ -232,8 +356,12 @@ def main() -> None:
     st.title("🔥 Stream Climax Detector")
     st.caption("Detección de picos de hype en chat de Kick.com en tiempo real")
 
-    storage = get_storage()
-    minutes = render_sidebar()
+    minutes, active_channel = render_sidebar()
+
+    # Si hay canal activo usamos su storage; si no, usamos "unknown" para
+    # mostrar pantalla vacía sin errores
+    channel_for_storage = active_channel if active_channel else "unknown"
+    storage = get_storage(channel_for_storage)
 
     df = load_recent(storage, minutes=minutes)
 
@@ -243,7 +371,7 @@ def main() -> None:
     st.divider()
     render_peaks_table(storage)
 
-    # Auto-refresco: espera REFRESH_INTERVAL segundos y re-ejecuta el script
+    # Auto-refresco cada REFRESH_INTERVAL segundos
     time.sleep(REFRESH_INTERVAL)
     st.rerun()
 

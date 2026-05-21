@@ -10,6 +10,7 @@ Flujo:
 
 import asyncio
 import json
+import threading
 import time
 
 import aiohttp
@@ -113,17 +114,26 @@ def _parse_chat_message(raw: str) -> dict | None:
 # ── Loop principal ───────────────────────────────────────────────────────────
 
 
-async def run(queue: asyncio.Queue | None = None) -> None:
+async def run(
+    queue: asyncio.Queue | None = None,
+    channel: str | None = None,
+    stop_event: threading.Event | None = None,
+) -> None:
     """
     Punto de entrada del consumer. Se conecta al chat de Kick y loguea
-    cada mensaje hasta que se interrumpa con Ctrl+C.
-    Implementa reconexión automática con backoff exponencial.
+    cada mensaje hasta que se interrumpa con Ctrl+C o stop_event.
 
     Args:
-        queue: si se pasa, cada mensaje parseado se pone en la queue
-               para que el aggregator lo consuma. Si es None, solo loguea.
+        queue:      si se pasa, cada mensaje parseado se pone en la queue
+                    para que el aggregator lo consuma. Si es None, solo loguea.
+        channel:    slug del canal a conectar. Si es None, usa KICK_CHANNEL
+                    del entorno (comportamiento original para run_consumer.py).
+        stop_event: threading.Event opcional. Cuando se llama .set() desde
+                    el hilo principal, el consumer termina su loop limpiamente.
     """
-    channel = get_kick_channel()
+    if channel is None:
+        channel = get_kick_channel()
+
     chatroom_id = await get_chatroom_id(channel)
 
     backoff = 1  # segundos de espera antes de reconectar
@@ -131,13 +141,25 @@ async def run(queue: asyncio.Queue | None = None) -> None:
     log.info("consumer_iniciando", channel=channel, chatroom_id=chatroom_id)
 
     while True:
+        # Chequeamos stop_event al inicio de cada iteración del loop.
+        # Esto garantiza que el consumer para limpiamente entre reconexiones.
+        if stop_event is not None and stop_event.is_set():
+            log.info("consumer_detenido", channel=channel)
+            return
+
         try:
-            await _connect_and_listen(chatroom_id, queue)
+            await _connect_and_listen(chatroom_id, queue, stop_event)
             backoff = 1  # reset si la conexión fue exitosa
         except websockets.exceptions.ConnectionClosed as exc:
             log.warning("conexion_cerrada", code=exc.code, reason=exc.reason)
         except Exception as exc:  # noqa: BLE001
             log.error("error_inesperado", error=str(exc))
+
+        # Si el stop_event llegó mientras estábamos conectados, salimos
+        # antes de intentar reconectar.
+        if stop_event is not None and stop_event.is_set():
+            log.info("consumer_detenido", channel=channel)
+            return
 
         log.info("reconectando", espera_segundos=backoff)
         await asyncio.sleep(backoff)
@@ -147,10 +169,11 @@ async def run(queue: asyncio.Queue | None = None) -> None:
 async def _connect_and_listen(
     chatroom_id: int,
     queue: asyncio.Queue | None = None,
+    stop_event: threading.Event | None = None,
 ) -> None:
     """
     Abre una conexión WebSocket, se suscribe al chatroom y procesa
-    mensajes hasta que la conexión se cierre.
+    mensajes hasta que la conexión se cierre o stop_event sea señalizado.
     """
     async with websockets.connect(PUSHER_WS_URL) as ws:
         log.info("websocket_conectado", url=PUSHER_WS_URL)
@@ -161,6 +184,10 @@ async def _connect_and_listen(
         last_ping = time.monotonic()
 
         async for raw_message in ws:
+            # Chequeamos stop_event en cada mensaje — salida limpia
+            if stop_event is not None and stop_event.is_set():
+                return
+
             # Ping periódico para mantener la conexión viva
             now = time.monotonic()
             if now - last_ping >= PING_INTERVAL:
