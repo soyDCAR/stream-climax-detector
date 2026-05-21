@@ -234,8 +234,14 @@ def render_sidebar() -> tuple[int, str]:
 
     active_channel = st.session_state.get("active_channel", "")
 
-    # Si el usuario escribió un canal diferente al activo → cambiar worker
-    if channel_input and channel_input != active_channel:
+    # Botón de conectar — arranca el worker solo cuando el usuario lo presiona,
+    # garantizando que ambos campos (canal + chatroom_id) están llenos
+    connect_pressed = st.sidebar.button(
+        "▶ Conectar",
+        disabled=not channel_input,
+    )
+
+    if connect_pressed and channel_input:
         # Para el worker anterior si existe
         stop_worker(
             st.session_state.get("worker_thread"),
@@ -260,14 +266,20 @@ def render_sidebar() -> tuple[int, str]:
         if thread and thread.is_alive():
             st.sidebar.success(f"📡 Conectado: **{active_channel}**")
         else:
-            # Worker caído — reiniciar automáticamente con el chatroom_id guardado
+            # Worker caído — solo reiniciar si tenemos chatroom_id guardado
+            # (sin él, volveríamos a llamar a la API de Kick y fallaría con 403)
             saved_chatroom_id = st.session_state.get("active_chatroom_id")
-            thread, stop_event = start_worker(
-                active_channel, chatroom_id=saved_chatroom_id
-            )
-            st.session_state["worker_thread"] = thread
-            st.session_state["stop_event"] = stop_event
-            st.sidebar.warning(f"♻️ Reconectando a **{active_channel}**...")
+            if saved_chatroom_id is not None:
+                thread, stop_event = start_worker(
+                    active_channel, chatroom_id=saved_chatroom_id
+                )
+                st.session_state["worker_thread"] = thread
+                st.session_state["stop_event"] = stop_event
+                st.sidebar.warning(f"♻️ Reconectando a **{active_channel}**...")
+            else:
+                st.sidebar.error(
+                    f"❌ Worker caído — ingresa el Chatroom ID y presiona Enter"
+                )
     else:
         st.sidebar.info("👆 Escribe un canal para empezar")
 
