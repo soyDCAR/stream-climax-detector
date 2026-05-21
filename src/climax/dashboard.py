@@ -45,7 +45,11 @@ DEFAULT_WINDOW = 10  # minutos de historial a mostrar por defecto
 # ── Pipeline en thread separado ───────────────────────────────────────────────
 
 
-async def _pipeline(channel: str, stop_event: threading.Event) -> None:
+async def _pipeline(
+    channel: str,
+    stop_event: threading.Event,
+    chatroom_id: int | None = None,
+) -> None:
     """
     Corrutina que orquesta consumer + aggregator + scorer + storage.
     Se ejecuta dentro de asyncio.run() en un thread dedicado.
@@ -55,6 +59,10 @@ async def _pipeline(channel: str, stop_event: threading.Event) -> None:
       el patrón estándar para corrutinas de larga duración en Streamlit.
     - El stop_event de threading es visible desde ambos lados:
       el thread del consumer lo lee, el hilo de Streamlit lo escribe.
+
+    Args:
+        chatroom_id: si se pasa, el consumer se salta la llamada REST a Kick
+                     (útil cuando la API está bloqueada por Cloudflare en Docker).
     """
     queue: asyncio.Queue = asyncio.Queue()
     scorer = ClimaxScorer()
@@ -74,24 +82,36 @@ async def _pipeline(channel: str, stop_event: threading.Event) -> None:
 
     try:
         await asyncio.gather(
-            consumer_run(queue=queue, channel=channel, stop_event=stop_event),
+            consumer_run(
+                queue=queue,
+                channel=channel,
+                stop_event=stop_event,
+                chatroom_id=chatroom_id,
+            ),
             aggregator_run(queue=queue, scorer=scorer),
         )
     finally:
         storage.close()
 
 
-def _run_pipeline_in_thread(channel: str, stop_event: threading.Event) -> None:
+def _run_pipeline_in_thread(
+    channel: str,
+    stop_event: threading.Event,
+    chatroom_id: int | None = None,
+) -> None:
     """Función target del thread — crea un event loop propio y corre el pipeline."""
-    asyncio.run(_pipeline(channel, stop_event))
+    asyncio.run(_pipeline(channel, stop_event, chatroom_id))
 
 
-def start_worker(channel: str) -> tuple[threading.Thread, threading.Event]:
+def start_worker(
+    channel: str,
+    chatroom_id: int | None = None,
+) -> tuple[threading.Thread, threading.Event]:
     """Crea y arranca un nuevo thread del pipeline para el canal dado."""
     stop_event = threading.Event()
     thread = threading.Thread(
         target=_run_pipeline_in_thread,
-        args=(channel, stop_event),
+        args=(channel, stop_event, chatroom_id),
         daemon=True,  # muere automáticamente si Streamlit termina
         name=f"climax-worker-{channel}",
     )
@@ -190,8 +210,27 @@ def render_sidebar() -> tuple[int, str]:
         .lower()
     )
 
-    # Guardamos el valor del input para que no se resetee en reruns
+    chatroom_id_raw = st.sidebar.text_input(
+        "Chatroom ID (opcional)",
+        value=st.session_state.get("chatroom_id_input", ""),
+        placeholder="123456",
+        help=(
+            "Evita el bloqueo de Cloudflare en Docker/HF. "
+            "Encuéntralo en: kick.com/api/v2/channels/CANAL → chatroom.id"
+        ),
+    ).strip()
+
+    # Parseamos el chatroom_id — None si está vacío o no es número
+    chatroom_id: int | None = None
+    if chatroom_id_raw:
+        try:
+            chatroom_id = int(chatroom_id_raw)
+        except ValueError:
+            st.sidebar.error("Chatroom ID debe ser un número")
+
+    # Guardamos los valores para que no se reseteen en reruns
     st.session_state["channel_input"] = channel_input
+    st.session_state["chatroom_id_input"] = chatroom_id_raw
 
     active_channel = st.session_state.get("active_channel", "")
 
@@ -203,8 +242,8 @@ def render_sidebar() -> tuple[int, str]:
             st.session_state.get("stop_event"),
         )
 
-        # Arranca el nuevo worker
-        thread, stop_event = start_worker(channel_input)
+        # Arranca el nuevo worker (con chatroom_id si se proporcionó)
+        thread, stop_event = start_worker(channel_input, chatroom_id=chatroom_id)
         st.session_state["worker_thread"] = thread
         st.session_state["stop_event"] = stop_event
         st.session_state["active_channel"] = channel_input

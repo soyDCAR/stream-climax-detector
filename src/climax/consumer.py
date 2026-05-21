@@ -53,7 +53,12 @@ async def get_chatroom_id(channel_slug: str) -> int:
     }
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as resp:
+        async with session.get(url, headers=headers, ssl=True) as resp:
+            if resp.status == 403:
+                raise RuntimeError(
+                    f"Canal '{channel_slug}': Kick bloqueó la petición (HTTP 403). "
+                    "El canal puede no existir o Kick está bloqueando el IP del servidor."
+                )
             if resp.status == 404:
                 raise RuntimeError(f"Canal '{channel_slug}' no encontrado en Kick.")
             if resp.status != 200:
@@ -118,23 +123,27 @@ async def run(
     queue: asyncio.Queue | None = None,
     channel: str | None = None,
     stop_event: threading.Event | None = None,
+    chatroom_id: int | None = None,
 ) -> None:
     """
     Punto de entrada del consumer. Se conecta al chat de Kick y loguea
     cada mensaje hasta que se interrumpa con Ctrl+C o stop_event.
 
     Args:
-        queue:      si se pasa, cada mensaje parseado se pone en la queue
-                    para que el aggregator lo consuma. Si es None, solo loguea.
-        channel:    slug del canal a conectar. Si es None, usa KICK_CHANNEL
-                    del entorno (comportamiento original para run_consumer.py).
-        stop_event: threading.Event opcional. Cuando se llama .set() desde
-                    el hilo principal, el consumer termina su loop limpiamente.
+        queue:        si se pasa, cada mensaje parseado se pone en la queue
+                      para que el aggregator lo consuma. Si es None, solo loguea.
+        channel:      slug del canal a conectar. Si es None, usa KICK_CHANNEL
+                      del entorno (comportamiento original para run_consumer.py).
+        stop_event:   threading.Event opcional. Cuando se llama .set() desde
+                      el hilo principal, el consumer termina su loop limpiamente.
+        chatroom_id:  si se pasa, se usa directamente sin llamar a la API REST
+                      de Kick. Útil cuando la API está bloqueada (ej: Docker/HF).
     """
     if channel is None:
         channel = get_kick_channel()
 
-    chatroom_id = await get_chatroom_id(channel)
+    if chatroom_id is None:
+        chatroom_id = await get_chatroom_id(channel)
 
     backoff = 1  # segundos de espera antes de reconectar
 
