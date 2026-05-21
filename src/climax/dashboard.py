@@ -242,7 +242,11 @@ def render_sidebar() -> tuple[int, str]:
             st.session_state.get("stop_event"),
         )
 
-        # Arranca el nuevo worker (con chatroom_id si se proporcionó)
+        # Guardamos el chatroom_id junto con el canal activo para poder
+        # reusarlo en reruns sin depender del input (que puede estar vacío)
+        st.session_state["active_chatroom_id"] = chatroom_id
+
+        # Arranca el nuevo worker
         thread, stop_event = start_worker(channel_input, chatroom_id=chatroom_id)
         st.session_state["worker_thread"] = thread
         st.session_state["stop_event"] = stop_event
@@ -256,7 +260,14 @@ def render_sidebar() -> tuple[int, str]:
         if thread and thread.is_alive():
             st.sidebar.success(f"📡 Conectado: **{active_channel}**")
         else:
-            st.sidebar.error(f"❌ Worker caído para **{active_channel}**")
+            # Worker caído — reiniciar automáticamente con el chatroom_id guardado
+            saved_chatroom_id = st.session_state.get("active_chatroom_id")
+            thread, stop_event = start_worker(
+                active_channel, chatroom_id=saved_chatroom_id
+            )
+            st.session_state["worker_thread"] = thread
+            st.session_state["stop_event"] = stop_event
+            st.sidebar.warning(f"♻️ Reconectando a **{active_channel}**...")
     else:
         st.sidebar.info("👆 Escribe un canal para empezar")
 
