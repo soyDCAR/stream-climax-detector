@@ -201,7 +201,10 @@ class ClimaxScorer:
         self.z_threshold = z_threshold
         self.cooldown_seconds = cooldown_seconds
         self.min_score_for_peak = min_score_for_peak
-        self._last_peak_time: float = 0.0  # monotonic timestamp del último pico
+        # -inf garantiza que el primer pico siempre pase el cooldown check,
+        # independientemente de cuándo arrancó el proceso (time.monotonic()
+        # puede ser cualquier valor positivo según el OS / entorno de CI)
+        self._last_peak_time: float = -float("inf")
 
     def process(self, window: FeatureWindow) -> ClimaxResult:
         """
