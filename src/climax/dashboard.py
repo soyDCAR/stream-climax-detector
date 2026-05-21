@@ -30,11 +30,12 @@ st.set_page_config(
     layout="wide",
 )
 
-REFRESH_INTERVAL = 2   # segundos entre refrescos automáticos
-DEFAULT_WINDOW   = 10  # minutos de historial a mostrar por defecto
+REFRESH_INTERVAL = 2  # segundos entre refrescos automáticos
+DEFAULT_WINDOW = 10  # minutos de historial a mostrar por defecto
 
 
 # ── Conexión a SQLite (cacheada) ──────────────────────────────────────────────
+
 
 @st.cache_resource
 def get_storage() -> Storage:
@@ -58,6 +59,7 @@ def get_storage() -> Storage:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def load_recent(storage: Storage, minutes: int) -> pd.DataFrame:
     """
@@ -91,6 +93,7 @@ def load_peaks(storage: Storage) -> pd.DataFrame:
 
 
 # ── Layout ────────────────────────────────────────────────────────────────────
+
 
 def render_sidebar() -> int:
     """Renderiza el sidebar y devuelve el rango de minutos seleccionado."""
@@ -143,7 +146,7 @@ def render_metrics(df: pd.DataFrame) -> None:
         return
 
     latest = df.iloc[-1]
-    prev   = df.iloc[-2] if len(df) > 1 else latest
+    prev = df.iloc[-2] if len(df) > 1 else latest
 
     col1.metric(
         "🔥 Climax Score",
@@ -207,8 +210,7 @@ def render_peaks_table(storage: Storage) -> None:
 
     if df.empty:
         st.info(
-            "Aún no se han detectado picos. "
-            "El scorer necesita ~50s para calibrarse."
+            "Aún no se han detectado picos. " "El scorer necesita ~50s para calibrarse."
         )
         return
 
@@ -224,6 +226,7 @@ def render_peaks_table(storage: Storage) -> None:
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
+
 
 def main() -> None:
     st.title("🔥 Stream Climax Detector")

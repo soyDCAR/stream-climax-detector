@@ -25,25 +25,25 @@ log = structlog.get_logger()
 # link_ratio es negativo: penaliza spam de links (no es hype real).
 # Suma de absolutos ≈ 1.0 para que raw_score sea interpretable.
 WEIGHTS: dict[str, float] = {
-    "msg_rate":          0.35,
-    "unique_users":      0.20,
-    "emote_ratio":       0.20,
-    "caps_ratio":        0.10,
-    "avg_msg_length":    0.05,
+    "msg_rate": 0.35,
+    "unique_users": 0.20,
+    "emote_ratio": 0.20,
+    "caps_ratio": 0.10,
+    "avg_msg_length": 0.05,
     "exclamation_ratio": 0.05,
-    "link_ratio":       -0.05,
+    "link_ratio": -0.05,
 }
 
 # Valores de referencia para normalizar cada feature a [0, 1].
 # Basados en un chat activo típico — ajustar con datos reales.
 NORMALIZATION: dict[str, float] = {
-    "msg_rate":          50.0,   # 50 msgs/s = chat muy activo
-    "unique_users":      30.0,   # 30 usuarios únicos en 5s
-    "emote_ratio":        1.0,   # ya es ratio [0-1]
-    "caps_ratio":         1.0,   # ya es ratio [0-1]
-    "avg_msg_length":    80.0,   # 80 chars = mensaje largo
-    "exclamation_ratio":  1.0,   # ya es ratio [0-1]
-    "link_ratio":         1.0,   # ya es ratio [0-1]
+    "msg_rate": 50.0,  # 50 msgs/s = chat muy activo
+    "unique_users": 30.0,  # 30 usuarios únicos en 5s
+    "emote_ratio": 1.0,  # ya es ratio [0-1]
+    "caps_ratio": 1.0,  # ya es ratio [0-1]
+    "avg_msg_length": 80.0,  # 80 chars = mensaje largo
+    "exclamation_ratio": 1.0,  # ya es ratio [0-1]
+    "link_ratio": 1.0,  # ya es ratio [0-1]
 }
 
 # Ventana histórica para z-score: 10 minutos / 5s por ventana = 120 entradas
@@ -61,30 +61,33 @@ MIN_SCORE_FOR_PEAK = 10.0
 
 # ── Estructuras de datos ─────────────────────────────────────────────────────
 
+
 @dataclass
 class ClimaxResult:
     """Resultado del scorer para una ventana de 5s."""
+
     timestamp: float
-    raw_score: float        # suma ponderada sin normalizar por z-score
-    climax_score: float     # score final [0-100]
-    z_score: float          # desviaciones sobre la media histórica
-    is_peak: bool           # True si se detectó un pico de hype
-    history_mean: float     # media histórica (para debug/visualización)
-    history_std: float      # std histórica (para debug/visualización)
+    raw_score: float  # suma ponderada sin normalizar por z-score
+    climax_score: float  # score final [0-100]
+    z_score: float  # desviaciones sobre la media histórica
+    is_peak: bool  # True si se detectó un pico de hype
+    history_mean: float  # media histórica (para debug/visualización)
+    history_std: float  # std histórica (para debug/visualización)
 
     def as_dict(self) -> dict:
         return {
-            "timestamp":    self.timestamp,
-            "raw_score":    self.raw_score,
+            "timestamp": self.timestamp,
+            "raw_score": self.raw_score,
             "climax_score": self.climax_score,
-            "z_score":      self.z_score,
-            "is_peak":      self.is_peak,
+            "z_score": self.z_score,
+            "is_peak": self.is_peak,
             "history_mean": self.history_mean,
-            "history_std":  self.history_std,
+            "history_std": self.history_std,
         }
 
 
 # ── Lógica pura ──────────────────────────────────────────────────────────────
+
 
 def compute_raw_score(window: FeatureWindow) -> float:
     """
@@ -97,13 +100,13 @@ def compute_raw_score(window: FeatureWindow) -> float:
     Puede superar 1.0 en momentos de hype extremo — eso es intencional.
     """
     feature_values = {
-        "msg_rate":          window.msg_rate,
-        "unique_users":      window.unique_users,
-        "emote_ratio":       window.emote_ratio,
-        "caps_ratio":        window.caps_ratio,
-        "avg_msg_length":    window.avg_msg_length,
+        "msg_rate": window.msg_rate,
+        "unique_users": window.unique_users,
+        "emote_ratio": window.emote_ratio,
+        "caps_ratio": window.caps_ratio,
+        "avg_msg_length": window.avg_msg_length,
         "exclamation_ratio": window.exclamation_ratio,
-        "link_ratio":        window.link_ratio,
+        "link_ratio": window.link_ratio,
     }
 
     score = 0.0
@@ -142,7 +145,7 @@ def compute_z_score(current: float, history: deque) -> tuple[float, float, float
 
     arr = np.array(history, dtype=np.float64)
     mean = float(np.mean(arr))
-    std  = float(np.std(arr))
+    std = float(np.std(arr))
 
     if std < 1e-9:
         # Historia completamente plana — cualquier diferencia es un spike.
@@ -176,6 +179,7 @@ def compute_climax_score(z_score: float) -> float:
 
 # ── Clase Scorer (stateful) ──────────────────────────────────────────────────
 
+
 class ClimaxScorer:
     """
     Scorer stateful: mantiene la historia de scores y el estado del cooldown.
@@ -197,7 +201,7 @@ class ClimaxScorer:
         self.z_threshold = z_threshold
         self.cooldown_seconds = cooldown_seconds
         self.min_score_for_peak = min_score_for_peak
-        self._last_peak_time: float = 0.0   # monotonic timestamp del último pico
+        self._last_peak_time: float = 0.0  # monotonic timestamp del último pico
 
     def process(self, window: FeatureWindow) -> ClimaxResult:
         """
@@ -217,9 +221,7 @@ class ClimaxScorer:
         now = time.monotonic()
         cooldown_ok = (now - self._last_peak_time) >= self.cooldown_seconds
         is_peak = (
-            z >= self.z_threshold
-            and raw >= self.min_score_for_peak
-            and cooldown_ok
+            z >= self.z_threshold and raw >= self.min_score_for_peak and cooldown_ok
         )
 
         if is_peak:

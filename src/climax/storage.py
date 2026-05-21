@@ -115,7 +115,7 @@ class Storage:
             _INSERT,
             (
                 self.channel,
-                time.time(),        # Unix timestamp real
+                time.time(),  # Unix timestamp real
                 result.raw_score,
                 result.climax_score,
                 result.z_score,

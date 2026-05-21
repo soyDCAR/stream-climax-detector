@@ -100,8 +100,8 @@ def test_avg_msg_length():
     Mensajes de longitud 4 y 6 → promedio = 5.0.
     """
     msgs = [
-        _make_msg("user1", "hola"),   # len=4
-        _make_msg("user2", "adios!"), # len=6
+        _make_msg("user1", "hola"),  # len=4
+        _make_msg("user2", "adios!"),  # len=6
     ]
     result = compute_features(msgs, window_seconds=5.0)
 
@@ -168,7 +168,13 @@ def test_feature_window_as_dict():
     d = result.as_dict()
 
     expected_keys = {
-        "timestamp", "msg_rate", "unique_users", "emote_ratio",
-        "caps_ratio", "avg_msg_length", "exclamation_ratio", "link_ratio",
+        "timestamp",
+        "msg_rate",
+        "unique_users",
+        "emote_ratio",
+        "caps_ratio",
+        "avg_msg_length",
+        "exclamation_ratio",
+        "link_ratio",
     }
     assert set(d.keys()) == expected_keys

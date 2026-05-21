@@ -34,11 +34,39 @@ MAX_MSGS = 2000
 # Emotes comunes de Kick / globales. Esta lista crece en versiones futuras.
 # Usamos un set para lookup O(1).
 KICK_EMOTES: set[str] = {
-    "KEKW", "POGGERS", "PogChamp", "Pog", "OMEGALUL", "LUL", "KEKLEO",
-    "monkaS", "monkaHmm", "PauseChamp", "ICANT", "Clap", "EZ", "ez",
-    "catJAM", "GIGACHAD", "Sadge", "pepeD", "pepeLaugh", "FeelsBadMan",
-    "FeelsGoodMan", "HYPERS", "PogU", "WeirdChamp", "Copium", "Aware",
-    "5Head", "EZY", "LULW", "BASED", "Prayge", "forsenCD", "D:",
+    "KEKW",
+    "POGGERS",
+    "PogChamp",
+    "Pog",
+    "OMEGALUL",
+    "LUL",
+    "KEKLEO",
+    "monkaS",
+    "monkaHmm",
+    "PauseChamp",
+    "ICANT",
+    "Clap",
+    "EZ",
+    "ez",
+    "catJAM",
+    "GIGACHAD",
+    "Sadge",
+    "pepeD",
+    "pepeLaugh",
+    "FeelsBadMan",
+    "FeelsGoodMan",
+    "HYPERS",
+    "PogU",
+    "WeirdChamp",
+    "Copium",
+    "Aware",
+    "5Head",
+    "EZY",
+    "LULW",
+    "BASED",
+    "Prayge",
+    "forsenCD",
+    "D:",
 }
 
 # Regex para detectar URLs
@@ -47,9 +75,11 @@ _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 # ── Estructuras de datos ─────────────────────────────────────────────────────
 
+
 @dataclass
 class ChatMessage:
     """Representa un mensaje de chat ya parseado por el consumer."""
+
     username: str
     content: str
     received_at: float = field(default_factory=time.monotonic)
@@ -61,14 +91,15 @@ class FeatureWindow:
     Resultado de una ventana de 5s.
     Todos los valores son float para uniformidad con numpy en el Scorer.
     """
-    timestamp: float          # tiempo de cierre de la ventana (monotonic)
-    msg_rate: float           # msgs/segundo
-    unique_users: float       # cantidad de usuarios únicos
-    emote_ratio: float        # [0.0 – 1.0]
-    caps_ratio: float         # [0.0 – 1.0]
-    avg_msg_length: float     # caracteres promedio
+
+    timestamp: float  # tiempo de cierre de la ventana (monotonic)
+    msg_rate: float  # msgs/segundo
+    unique_users: float  # cantidad de usuarios únicos
+    emote_ratio: float  # [0.0 – 1.0]
+    caps_ratio: float  # [0.0 – 1.0]
+    avg_msg_length: float  # caracteres promedio
     exclamation_ratio: float  # [0.0 – 1.0]
-    link_ratio: float         # [0.0 – 1.0]
+    link_ratio: float  # [0.0 – 1.0]
 
     def as_dict(self) -> dict:
         return {
@@ -84,6 +115,7 @@ class FeatureWindow:
 
 
 # ── Cálculo de features ──────────────────────────────────────────────────────
+
 
 def compute_features(
     messages: list[ChatMessage], window_seconds: float
@@ -157,6 +189,7 @@ def compute_features(
 
 
 # ── Loop async ───────────────────────────────────────────────────────────────
+
 
 async def run(
     queue: asyncio.Queue,

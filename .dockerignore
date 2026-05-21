@@ -1,0 +1,28 @@
+# Entorno virtual local — el Docker build crea el suyo
+.venv/
+
+# Secrets — nunca en la imagen
+.env
+
+# Base de datos local
+*.db
+*.sqlite
+
+# Git
+.git/
+.github/
+
+# Tests y herramientas de dev
+tests/
+scripts/
+docs/
+
+# Caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db

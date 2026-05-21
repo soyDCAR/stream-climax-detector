@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    name: Tests + Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout del código
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Instalar uv (gestor de entorno)
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      # 3. Crear entorno virtual con Python 3.11
+      - name: Set up Python 3.11
+        run: uv python install 3.11
+
+      # 4. Instalar dependencias (prod + dev)
+      # uv sync es más rápido que pip install — usa el lock file
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      # 5. Lint con ruff — falla el CI si hay errores de estilo
+      - name: Lint (ruff)
+        run: uv run ruff check src/ tests/ scripts/
+
+      # 6. Format check con black — falla si el código no está formateado
+      - name: Format check (black)
+        run: uv run black --check src/ tests/ scripts/
+
+      # 7. Tests con pytest — falla si algún test no pasa
+      - name: Tests (pytest)
+        env:
+          # El consumer necesita esta variable para importar config.py
+          # En CI no hay canal real — usamos un valor dummy
+          KICK_CHANNEL: ci_test_channel
+        run: uv run pytest tests/ -v --tb=short

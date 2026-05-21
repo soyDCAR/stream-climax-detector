@@ -18,8 +18,8 @@ from climax.scorer import (
     compute_z_score,
 )
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _make_window(
     msg_rate: float = 0.0,
@@ -44,6 +44,7 @@ def _make_window(
 
 
 # ── Tests: compute_raw_score ─────────────────────────────────────────────────
+
 
 def test_raw_score_empty_window_is_zero():
     """
@@ -70,8 +71,8 @@ def test_raw_score_hype_window_is_high():
     No testeamos un valor exacto, sino que supere un umbral razonable.
     """
     window = _make_window(
-        msg_rate=50.0,       # = referencia máxima
-        unique_users=30.0,   # = referencia máxima
+        msg_rate=50.0,  # = referencia máxima
+        unique_users=30.0,  # = referencia máxima
         emote_ratio=1.0,
         caps_ratio=1.0,
         exclamation_ratio=1.0,
@@ -90,6 +91,7 @@ def test_raw_score_link_spam_penalizes():
 
 
 # ── Tests: compute_z_score ───────────────────────────────────────────────────
+
 
 def test_z_score_empty_history():
     """Sin historia → z=0, mean=current, std=0."""
@@ -120,7 +122,9 @@ def test_z_score_positive_spike():
     Historia con media 10, std 2. Valor actual 14 → z = (14-10)/2 = 2.0.
     """
     # Historia: 10 valores = 10, con std=0. Agregamos varianza manualmente.
-    history: deque = deque([8.0, 10.0, 12.0, 10.0, 10.0, 8.0, 12.0, 10.0, 10.0, 10.0], maxlen=20)
+    history: deque = deque(
+        [8.0, 10.0, 12.0, 10.0, 10.0, 8.0, 12.0, 10.0, 10.0, 10.0], maxlen=20
+    )
     z, mean, std = compute_z_score(14.0, history)
     assert z > 1.5, f"Esperaba z > 1.5 para un pico, got {z}"
 
@@ -133,6 +137,7 @@ def test_z_score_negative_dip():
 
 
 # ── Tests: compute_climax_score ───────────────────────────────────────────────
+
 
 def test_climax_score_z_zero_is_50():
     """z=0 → climax_score = 50.0 (punto neutro de la sigmoid)."""
@@ -161,6 +166,7 @@ def test_climax_score_z2_is_above_88():
 
 # ── Tests: ClimaxScorer (stateful) ────────────────────────────────────────────
 
+
 def test_scorer_no_peak_without_history():
     """
     Sin historia suficiente, no debe detectar picos aunque el score sea alto.
@@ -185,8 +191,10 @@ def test_scorer_detects_peak_above_threshold():
 
     # Ahora un spike
     spike_window = _make_window(
-        msg_rate=50.0, unique_users=30.0,
-        emote_ratio=1.0, caps_ratio=1.0,
+        msg_rate=50.0,
+        unique_users=30.0,
+        emote_ratio=1.0,
+        caps_ratio=1.0,
         exclamation_ratio=1.0,
     )
     result = scorer.process(spike_window)
@@ -199,15 +207,19 @@ def test_scorer_cooldown_prevents_consecutive_peaks():
     Dos spikes consecutivos → solo el primero debe ser pico.
     El cooldown de 30s bloquea el segundo (en el test usamos 999s).
     """
-    scorer = ClimaxScorer(z_threshold=2.0, cooldown_seconds=999.0, min_score_for_peak=0.0)
+    scorer = ClimaxScorer(
+        z_threshold=2.0, cooldown_seconds=999.0, min_score_for_peak=0.0
+    )
 
     # Historia baja
     for _ in range(20):
         scorer.process(_make_window(msg_rate=1.0))
 
     spike = _make_window(
-        msg_rate=50.0, unique_users=30.0,
-        emote_ratio=1.0, caps_ratio=1.0,
+        msg_rate=50.0,
+        unique_users=30.0,
+        emote_ratio=1.0,
+        caps_ratio=1.0,
     )
 
     result1 = scorer.process(spike)
@@ -224,7 +236,9 @@ def test_scorer_is_warmed_up_after_10_windows():
 
     for i in range(9):
         scorer.process(window)
-        assert scorer.is_warmed_up is False, f"No debería estar warmed up en ventana {i+1}"
+        assert (
+            scorer.is_warmed_up is False
+        ), f"No debería estar warmed up en ventana {i+1}"
 
     scorer.process(window)
     assert scorer.is_warmed_up is True
@@ -237,7 +251,12 @@ def test_scorer_result_has_all_fields():
     d = result.as_dict()
 
     expected_keys = {
-        "timestamp", "raw_score", "climax_score",
-        "z_score", "is_peak", "history_mean", "history_std",
+        "timestamp",
+        "raw_score",
+        "climax_score",
+        "z_score",
+        "is_peak",
+        "history_mean",
+        "history_std",
     }
     assert set(d.keys()) == expected_keys
