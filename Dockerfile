@@ -28,14 +28,18 @@ FROM python:3.11-slim-bookworm AS runtime
 
 WORKDIR /app
 
-# Creamos usuario no-root por seguridad.
-# Correr como root en un contenedor es un anti-pattern —
-# si hay una vulnerabilidad, el atacante tiene acceso root al host.
-RUN useradd --create-home --shell /bin/bash appuser
+# Hugging Face Spaces requiere un usuario con UID=1000.
+# useradd --uid 1000 lo garantiza explícitamente.
+# En local puedes correr con cualquier usuario — esto no rompe nada.
+RUN useradd --create-home --shell /bin/bash --uid 1000 appuser
 
 # Copiamos el venv construido en el stage anterior
 COPY --from=builder /app/.venv .venv
 COPY --from=builder /app/src src/
+
+# Damos permisos al usuario sobre el directorio de trabajo
+# (necesario para que Streamlit pueda escribir archivos temporales)
+RUN chown -R appuser:appuser /app
 
 # Variables de entorno para que Python use el venv sin activarlo
 ENV PATH="/app/.venv/bin:$PATH" \
@@ -43,19 +47,20 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1
 
 # KICK_CHANNEL debe pasarse en runtime:
-# docker run -e KICK_CHANNEL=nexxuz ...
+#   Local:      docker run -e KICK_CHANNEL=nexxuz ...
+#   HF Spaces:  configurar en Settings > Variables
 ENV KICK_CHANNEL=""
 
-# Puerto del dashboard Streamlit
-EXPOSE 8501
+# HF Spaces requiere el puerto 7860.
+# En local también funciona — solo cambia la URL de acceso.
+EXPOSE 7860
 
 # Cambiamos al usuario no-root antes de ejecutar
 USER appuser
 
 # Comando por defecto: dashboard Streamlit
-# Para correr el consumer en su lugar:
-# docker run ... python -m climax.consumer
+# Puerto 7860 = requerido por Hugging Face Spaces
 CMD ["streamlit", "run", "src/climax/dashboard.py", \
-     "--server.port=8501", \
+     "--server.port=7860", \
      "--server.address=0.0.0.0", \
      "--server.headless=true"]
