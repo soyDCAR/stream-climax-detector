@@ -192,7 +192,6 @@ def test_context_manager_closes_connection(tmp_path: Path):
     db_path = tmp_path / "ctx.db"
     with Storage(db_path=db_path, channel="test") as s:
         s.save(_make_result())
-        conn = s._conn
 
     # Después del with, _conn debe ser None
     assert s._conn is None

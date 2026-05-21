@@ -8,8 +8,6 @@ con historia controlada. Sin mocks, sin event loop.
 import time
 from collections import deque
 
-import pytest
-
 from climax.aggregator import FeatureWindow
 from climax.scorer import (
     ClimaxScorer,
