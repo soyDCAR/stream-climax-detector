@@ -29,7 +29,7 @@ PUSHER_WS_URL = (
     f"wss://ws-us2.pusher.com/app/{PUSHER_APP_KEY}"
     "?protocol=7&client=js&version=8.4.0-rc2&flash=false"
 )
-CHAT_EVENT = "App\\Events\\ChatMessageSentEvent"
+CHAT_EVENT = "App\\Events\\ChatMessageEvent"
 PING_INTERVAL = 30  # segundos
 
 
@@ -81,7 +81,7 @@ def _subscribe_message(chatroom_id: int) -> str:
     return json.dumps(
         {
             "event": "pusher:subscribe",
-            "data": {"auth": "", "channel": f"chatrooms.{chatroom_id}"},
+            "data": {"auth": "", "channel": f"chatrooms.{chatroom_id}.v2"},
         }
     )
 
@@ -106,13 +106,12 @@ def _parse_chat_message(raw: str) -> dict | None:
     except (json.JSONDecodeError, KeyError):
         return None
 
-    msg = inner.get("message", {})
     sender = inner.get("sender", {})
 
     return {
         "username": sender.get("username", "unknown"),
-        "content": msg.get("content", ""),
-        "created_at": msg.get("created_at", ""),
+        "content": inner.get("content", ""),
+        "created_at": inner.get("created_at", ""),
     }
 
 
