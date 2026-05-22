@@ -21,6 +21,7 @@ Modelo de ejecución de Streamlit:
 import asyncio
 import threading
 import time
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
 import streamlit as st
@@ -40,6 +41,38 @@ st.set_page_config(
 
 REFRESH_INTERVAL = 2  # segundos entre refrescos automáticos
 DEFAULT_WINDOW = 10  # minutos de historial a mostrar por defecto
+
+
+def _local_tz() -> ZoneInfo:
+    """
+    Detecta el timezone local del sistema usando zoneinfo.
+    Si no se puede detectar (ej: Docker sin tzdata), cae a UTC.
+
+    En Docker/HF el timezone suele ser UTC — el usuario puede
+    configurar TZ=America/Bogota como variable de entorno para
+    ver su hora local.
+    """
+    import os
+
+    tz_name = os.environ.get("TZ", "")
+    if tz_name:
+        try:
+            return ZoneInfo(tz_name)
+        except ZoneInfoNotFoundError:
+            pass
+
+    # Intentar leer /etc/timezone (Linux)
+    try:
+        with open("/etc/timezone") as f:
+            tz_name = f.read().strip()
+            return ZoneInfo(tz_name)
+    except (FileNotFoundError, ZoneInfoNotFoundError):
+        pass
+
+    return ZoneInfo("UTC")
+
+
+LOCAL_TZ = _local_tz()
 
 
 # ── Pipeline en thread separado ───────────────────────────────────────────────
@@ -165,7 +198,9 @@ def load_recent(storage: Storage, minutes: int) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame(rows)
-    df["datetime"] = pd.to_datetime(df["timestamp"], unit="s")
+    df["datetime"] = pd.to_datetime(df["timestamp"], unit="s", utc=True).dt.tz_convert(
+        str(LOCAL_TZ)
+    )
     df["is_peak"] = df["is_peak"].astype(bool)
     return df
 
@@ -177,7 +212,9 @@ def load_peaks(storage: Storage) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = pd.DataFrame(rows)
-    df["datetime"] = pd.to_datetime(df["timestamp"], unit="s")
+    df["datetime"] = pd.to_datetime(df["timestamp"], unit="s", utc=True).dt.tz_convert(
+        str(LOCAL_TZ)
+    )
     df["climax_score"] = df["climax_score"].round(1)
     df["z_score"] = df["z_score"].round(2)
     df["raw_score"] = df["raw_score"].round(1)
