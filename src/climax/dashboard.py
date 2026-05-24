@@ -451,6 +451,27 @@ def render_peaks_table(storage: Storage) -> None:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
+@st.fragment(run_every=REFRESH_INTERVAL)
+def _live_content(channel_for_storage: str, minutes: int) -> None:
+    """
+    Fragment que se refresca automáticamente cada REFRESH_INTERVAL segundos.
+
+    Por qué st.fragment en lugar de time.sleep + st.rerun:
+    - time.sleep bloquea el hilo principal de Streamlit, congelando la UI
+      cuando hay threads en background activos (el consumer/aggregator).
+    - st.fragment(run_every=N) refresca solo esta sección sin bloquear,
+      permitiendo que el sidebar y otros widgets sigan respondiendo.
+    """
+    storage = get_storage(channel_for_storage)
+    df = load_recent(storage, minutes=minutes)
+
+    render_metrics(df)
+    st.divider()
+    render_timeline(df)
+    st.divider()
+    render_peaks_table(storage)
+
+
 def main() -> None:
     st.title("🔥 Stream Climax Detector")
     st.caption("Detección de picos de hype en chat de Kick.com en tiempo real")
@@ -460,19 +481,8 @@ def main() -> None:
     # Si hay canal activo usamos su storage; si no, usamos "unknown" para
     # mostrar pantalla vacía sin errores
     channel_for_storage = active_channel if active_channel else "unknown"
-    storage = get_storage(channel_for_storage)
 
-    df = load_recent(storage, minutes=minutes)
-
-    render_metrics(df)
-    st.divider()
-    render_timeline(df)
-    st.divider()
-    render_peaks_table(storage)
-
-    # Auto-refresco cada REFRESH_INTERVAL segundos
-    time.sleep(REFRESH_INTERVAL)
-    st.rerun()
+    _live_content(channel_for_storage, minutes)
 
 
 if __name__ == "__main__":
