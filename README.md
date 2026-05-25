@@ -41,11 +41,11 @@ flowchart LR
 ```
 
 **Pipeline:**
-1. **Consumer** connects to Kick's Pusher WebSocket, resolves `chatroom_id` via REST API, subscribes to `chatrooms.{id}`, and puts parsed messages into an `asyncio.Queue`.
+1. **Consumer** connects to Kick's Pusher WebSocket (`chatrooms.{id}.v2`), resolves `chatroom_id` via REST API or manual input, and puts parsed messages into an `asyncio.Queue`.
 2. **Aggregator** drains the queue every 5 seconds, computes 7 features, and passes a `FeatureWindow` to the scorer.
 3. **Scorer** calculates a weighted sum → normalizes via adaptive z-score over 10-minute history → maps to `[0, 100]` via sigmoid → fires a peak event if `z ≥ 2.0` and cooldown (30s) has elapsed.
 4. **Storage** persists every `ClimaxResult` to SQLite with WAL mode for concurrent read/write.
-5. **Dashboard** auto-refreshes every 2s, reads from SQLite, and displays the live timeline + peaks table.
+5. **Dashboard** auto-refreshes every 2s via `st.fragment`, reads from SQLite, and displays the live timeline + peaks table. The consumer runs as a background thread managed from the sidebar — no separate process needed.
 
 ---
 
@@ -84,9 +84,29 @@ something very different on a 5 msg/s channel vs. a 200 msg/s channel.
 
 - Python 3.11
 - [uv](https://docs.astral.sh/uv/) (`pip install uv`)
-- A Kick.com channel to monitor
+- Docker (recommended)
 
-### Install
+### Docker (recommended)
+
+```bash
+git clone https://github.com/soyDCAR/stream-climax-detector
+cd stream-climax-detector
+
+docker build -t stream-climax-detector .
+docker run -p 8501:7860 -e TZ=America/Bogota stream-climax-detector
+```
+
+Open [http://localhost:8501](http://localhost:8501).
+
+In the sidebar:
+1. Enter the channel name (e.g. `chanty`)
+2. Enter the Chatroom ID — find it at `kick.com/api/v2/channels/{channel}` → `chatroom.id`
+3. Press **▶ Conectar**
+
+> **Why the Chatroom ID?** Kick's REST API is protected by Cloudflare and blocks server/container requests.
+> The Chatroom ID lets the consumer skip the REST call and connect directly via WebSocket.
+
+### Local (without Docker)
 
 ```bash
 git clone https://github.com/soyDCAR/stream-climax-detector
@@ -94,29 +114,10 @@ cd stream-climax-detector
 
 uv venv --python 3.11
 uv pip install -e ".[dev]"
-```
 
-### Configure
-
-```bash
-cp .env.example .env
-# Edit .env:
-# KICK_CHANNEL=nexxuz
-```
-
-### Run
-
-**Terminal 1 — consumer + scorer (starts writing to DB):**
-```bash
-python scripts/run_consumer.py
-```
-
-**Terminal 2 — dashboard:**
-```bash
 streamlit run src/climax/dashboard.py
 ```
 
-Open [http://localhost:8501](http://localhost:8501).
 The scorer needs ~50s of data to warm up its z-score baseline.
 
 ---
@@ -127,15 +128,11 @@ The scorer needs ~50s of data to warm up its z-score baseline.
 # Build
 docker build -t stream-climax-detector .
 
-# Run dashboard
-docker run -p 7860:7860 -e KICK_CHANNEL=nexxuz stream-climax-detector
-
-# Run consumer (separate container, shared volume for DB)
-docker run -e KICK_CHANNEL=nexxuz \
-  -v $(pwd)/climax.db:/app/climax.db \
-  stream-climax-detector \
-  python scripts/run_consumer.py
+# Run (consumer + dashboard in one container)
+docker run -p 8501:7860 -e TZ=America/Bogota stream-climax-detector
 ```
+
+Set `TZ` to your local timezone (e.g. `America/Bogota`, `Europe/Madrid`, `America/Mexico_City`) so the timeline X-axis shows your local time instead of UTC.
 
 ---
 
@@ -179,8 +176,9 @@ stream-climax-detector/
 ## Roadmap
 
 - **v0.1** — Chat features + z-score scorer + Streamlit dashboard ✅
-- **v0.2** — Audio features (stream audio via yt-dlp + librosa RMS/spectral flux)
-- **v0.3** — Video features (frame diff + scene change detection via OpenCV)
+- **v0.2** — Dynamic channel switching from UI + Cloudflare-bypass via Chatroom ID ✅
+- **v0.3** — Audio features (stream audio via yt-dlp + librosa RMS/spectral flux)
+- **v0.4** — Video features (frame diff + scene change detection via OpenCV)
 - **v1.0** — Multimodal fusion model + HF dataset export
 
 ---

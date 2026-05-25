@@ -187,27 +187,19 @@ async def _connect_and_listen(
         log.info("websocket_conectado", url=PUSHER_WS_URL)
 
         # Leer el handshake inicial de Pusher antes de suscribirse
-        handshake = await ws.recv()
-        log.info("pusher_handshake", data=handshake[:300])
+        await ws.recv()
 
         # Suscribirse al canal del chatroom
-        sub_msg = _subscribe_message(chatroom_id)
-        log.info("enviando_suscripcion", msg=sub_msg)
-        await ws.send(sub_msg)
+        await ws.send(_subscribe_message(chatroom_id))
+        log.info("suscripcion_enviada", chatroom_id=chatroom_id)
 
         # Leer la confirmación de suscripción
-        sub_response = await ws.recv()
-        log.info("respuesta_suscripcion", data=sub_response[:300])
+        await ws.recv()
+        log.info("suscripcion_confirmada", chatroom_id=chatroom_id)
 
         last_ping = time.monotonic()
 
-        _debug_count = 0
         async for raw_message in ws:
-            # Log temporal para debug: primeros 10 frames crudos
-            if _debug_count < 10:
-                log.info("raw_frame", data=raw_message[:300])
-                _debug_count += 1
-
             # Chequeamos stop_event en cada mensaje — salida limpia
             if stop_event is not None and stop_event.is_set():
                 return
