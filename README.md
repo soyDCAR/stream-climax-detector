@@ -4,7 +4,7 @@ emoji: 🔥
 colorFrom: purple
 colorTo: blue
 sdk: docker
-pinned: false
+pinned: true
 short_description: Real-time hype peak detector for Kick.com live chat
 ---
 
