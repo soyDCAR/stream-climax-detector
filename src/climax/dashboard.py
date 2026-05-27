@@ -19,6 +19,7 @@ Modelo de ejecución de Streamlit:
 """
 
 import asyncio
+import os
 import threading
 import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -30,6 +31,18 @@ from climax.aggregator import run as aggregator_run
 from climax.consumer import run as consumer_run
 from climax.scorer import ClimaxScorer
 from climax.storage import DEFAULT_DB_PATH, Storage
+
+# ── Variables de entorno para auto-arranque (HF Spaces) ──────────────────────
+# Si KICK_CHANNEL y KICK_CHATROOM_ID están definidas, el worker arranca
+# automáticamente al iniciar sin necesidad de interacción del usuario.
+_ENV_CHANNEL = os.environ.get("KICK_CHANNEL", "").strip().lower()
+_ENV_CHATROOM_ID_RAW = os.environ.get("KICK_CHATROOM_ID", "").strip()
+_ENV_CHATROOM_ID: int | None = None
+if _ENV_CHATROOM_ID_RAW:
+    try:
+        _ENV_CHATROOM_ID = int(_ENV_CHATROOM_ID_RAW)
+    except ValueError:
+        pass
 
 # ── Configuración de página ───────────────────────────────────────────────────
 
@@ -475,6 +488,23 @@ def _live_content(channel_for_storage: str, minutes: int) -> None:
 def main() -> None:
     st.title("🔥 Stream Climax Detector")
     st.caption("Detección de picos de hype en chat de Kick.com en tiempo real")
+
+    # Auto-arranque desde variables de entorno (HF Spaces / Docker con env vars)
+    # Solo arranca una vez — si ya hay un worker activo, no hace nada.
+    if (
+        _ENV_CHANNEL
+        and _ENV_CHATROOM_ID is not None
+        and not st.session_state.get("active_channel")
+    ):
+        thread = st.session_state.get("worker_thread")
+        if thread is None or not thread.is_alive():
+            t, stop_ev = start_worker(_ENV_CHANNEL, chatroom_id=_ENV_CHATROOM_ID)
+            st.session_state["worker_thread"] = t
+            st.session_state["stop_event"] = stop_ev
+            st.session_state["active_channel"] = _ENV_CHANNEL
+            st.session_state["active_chatroom_id"] = _ENV_CHATROOM_ID
+            st.session_state["channel_input"] = _ENV_CHANNEL
+            st.session_state["chatroom_id_input"] = str(_ENV_CHATROOM_ID)
 
     minutes, active_channel = render_sidebar()
 
