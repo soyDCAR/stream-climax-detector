@@ -35,8 +35,8 @@ from climax.storage import DEFAULT_DB_PATH, Storage
 # ── Variables de entorno para auto-arranque (HF Spaces) ──────────────────────
 # Si KICK_CHANNEL y KICK_CHATROOM_ID están definidas, el worker arranca
 # automáticamente al iniciar sin necesidad de interacción del usuario.
-_ENV_CHANNEL = os.environ.get("KICK_CHANNEL", "").strip().lower()
-_ENV_CHATROOM_ID_RAW = os.environ.get("KICK_CHATROOM_ID", "").strip()
+_ENV_CHANNEL = os.environ.get("STREAM_CHANNEL", os.environ.get("KICK_CHANNEL", "")).strip().lower()
+_ENV_CHATROOM_ID_RAW = os.environ.get("STREAM_CHATROOM_ID", os.environ.get("KICK_CHATROOM_ID", "")).strip()
 _ENV_CHATROOM_ID: int | None = None
 if _ENV_CHATROOM_ID_RAW:
     try:
